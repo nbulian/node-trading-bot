@@ -117,7 +117,7 @@ const _sell = async (price) => {
 
     if (toSold.length > 0) {
         const totalAmount = parseFloat(toSold.map(order => order.amount).reduce((total, next) => parseFloat(total) + parseFloat(next)))
-        if (totalAmount > 0 && parseFloat(storage.get(`${MARKET1.toLowerCase()}_balance)`)) >= totalAmount) {
+        if (totalAmount > 0 && parseFloat(storage.get(`${MARKET1.toLowerCase()}_balance`)) >= totalAmount) {
             log(`
                 Selling ${MARKET1}
                 ==================
