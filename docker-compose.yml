@@ -1,0 +1,18 @@
+version: "3"
+services:
+  node:
+    container_name: trading-bot
+    working_dir: /var/www/html/
+    restart: always
+    tty: true
+    build:
+      context: ./
+      dockerfile: .docker/node/Dockerfile
+      args:
+        UID: 1000
+        GID: 1000
+    volumes:
+      - "./:/var/www/html"
+    ports:
+      - "3001:3001"
+      - "9229:9229"

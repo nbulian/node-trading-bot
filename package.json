@@ -1,0 +1,33 @@
+{
+  "name": "another-trading-bot",
+  "version": "1.0.0",
+  "description": "Trading bot based on grid strategy (more coming) for Binance (KuCoin next) made in Node JS to earn money in the form of passive income.",
+  "main": "app.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "nodemon --inspect=0.0.0.0 /var/www/html/app.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nbulian/node-trading-bot.git"
+  },
+  "keywords": [
+    "crypto",
+    "trading",
+    "bot",
+    "strategy",
+    "binance"
+  ],
+  "author": "Nahuel Bulián",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/nbulian/node-trading-bot/issues"
+  },
+  "homepage": "https://github.com/nbulian/node-trading-bot#readme",
+  "dependencies": {
+    "dotenv": "^16.0.1",
+    "node-binance-api": "^0.13.1",
+    "node-storage": "^0.0.9",
+    "nodemon": "^2.0.19"
+  }
+}
