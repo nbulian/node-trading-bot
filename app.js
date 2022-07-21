@@ -37,7 +37,7 @@ const _calculateProfits = async () => {
     const totalSoldProfits = sold.length > 0 ?
         sold.map(order => order.profit).reduce((total, next) => parseFloat(total) + parseFloat(next)) :
         0
-    storage.put('profit', totalSoldProfits + parseFloat(storage.get(profits)))
+    storage.put('profits', totalSoldProfits + parseFloat(storage.get('profits')))
 }
 
 const _logProfits = (price) => {
@@ -104,7 +104,7 @@ const _buy = async (price, amount) => {
 }
 
 const _sell = async (price) => {
-    const orders = storage.get('orders')
+    let orders = storage.get('orders')
     const toSold = []
 
     orders.forEach(order => {
@@ -153,9 +153,8 @@ const _sell = async (price) => {
                 await _calculateProfits()
 
                 // removing orders with status sold
-                const orderFiltered = orders.filter(order => value.status !== 'sold');
+                orders = orders.filter(order => order.status !== 'sold');
 
-                orders = orderFiltered;
             } else storage.put('start_price', price)
         } else storage.put('start_price', price)
     } else storage.put('start_price', price)
