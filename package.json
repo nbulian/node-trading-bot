@@ -26,6 +26,7 @@
   "homepage": "https://github.com/nbulian/node-trading-bot#readme",
   "dependencies": {
     "dotenv": "^16.0.1",
+    "moment": "^2.29.4",
     "node-binance-api": "^0.13.1",
     "node-storage": "^0.0.9",
     "nodemon": "^2.0.19"

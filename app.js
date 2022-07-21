@@ -2,6 +2,7 @@ require('dotenv').config()
 const Storage = require('node-storage')
 const { colors, log, logColor } = require('./utils/logger')
 const client = require('./services/binance')
+const moment = require('moment')
 
 const MARKET1 = process.argv[2]
 const MARKET2 = process.argv[3]
@@ -9,6 +10,11 @@ const MARKET = MARKET1 + MARKET2
 const BUY_ORDER_AMOUNT = process.argv[4]
 const storage = new Storage(`./data/${MARKET}.json`)
 const sleep = (milliseconds) => new Promise(resolve => setTimeout(resolve, milliseconds))
+
+const elapsedTime = () => {
+    const diff = Date.now() - storage.get('start_time')
+    return moment.utc(diff).format('HH:mm:ss')
+}
 
 const _balances = async () => {
     return await client.balance()
@@ -170,6 +176,8 @@ const broadcast = async () => {
                 const startPrice = storage.get('start_price')
 
                 console.clear()
+
+                log(`Running Time: ${elapsedTime()}`)
                 log('================================================================================')
                 _logProfits(marketPrice)
                 log('================================================================================')
@@ -204,8 +212,10 @@ const broadcast = async () => {
 
 const init = async () => {
     if (process.argv[5] !== 'resume') {
+        const startTime = Date.now()
         const price = await client.prices(MARKET)
         const balances = await _balances()
+        storage.put('start_time', startTime)
         storage.put('start_price', parseFloat(price[MARKET]))
         storage.put('orders', [])
         storage.put('profits', 0)
@@ -218,6 +228,6 @@ const init = async () => {
     broadcast()
 }
 
-logColor(colors.yellow, 'My NodeJS Trading Spot Bot'.toLocaleUpperCase())
+logColor(colors.yellow, 'Welcome to Crypto Trading Spot Bot'.toLocaleUpperCase())
 
 init()
