@@ -4,6 +4,16 @@ Trading bot based on grid strategy (more coming) for Binance (KuCoin next) made 
 ## What Is Grid Trading?
 Grid trading is when orders are placed above and below a set price, creating a grid of orders at incrementally increasing and decreasing prices. Grid trading is most commonly associated with the foreign exchange market. Overall the technique seeks to capitalize on normal price volatility in an asset by placing buy and sell orders at certain regular intervals above and below a predefined base price.
 
+## In order to use this bot, you need to create a .env file at the application root level as follow
+
+APP_SLEEP_TIME=in-milliseconds
+
+APP_PRICE_PERCENT=in-percent-like-0.2
+
+APP_BINANCE_APIKEY=your-binance-apikey
+
+APP_BINANCE_SECRET=your-binance-secret
+
 # This bot run as a process
 For example, from inside the docker container or server run as follow:
 
