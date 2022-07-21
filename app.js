@@ -177,16 +177,7 @@ const broadcast = async () => {
                 log(`Prev price: ${startPrice} `)
                 log(`New price: ${marketPrice} `)
 
-                if (marketPrice > startPrice) {
-                    const factor = (marketPrice - startPrice)
-                    const percent = 100 * factor / marketPrice
-                    logColor(colors.green, `Gainers: +${parseFloat(percent).toFixed(3)}% ==> +$${parseFloat(factor).toFixed(5)}}`)
-                    storage.put('percent', `+${parseFloat(percent).toFixed(3)}`)
-
-                    if (percent >= process.env.APP_PRICE_PERCENT) {
-                        await _sell(marketPrice)
-                    }
-                } else if (marketPrice < startPrice) {
+                if (marketPrice < startPrice) {
                     const factor = (startPrice - marketPrice)
                     const percent = 100 * factor / startPrice
                     logColor(colors.yellow, `Losers: -${parseFloat(percent).toFixed(3)}% ==> -$${parseFloat(factor).toFixed(5)}}`)
@@ -196,8 +187,12 @@ const broadcast = async () => {
                         await _buy(marketPrice, BUY_ORDER_AMOUNT)
                     }
                 } else {
-                    logColor(colors.gray, 'Change: 0.000% ==> $0.000')
-                    storage.put('percent', '0.000')
+                    const factor = (marketPrice - startPrice)
+                    const percent = 100 * factor / marketPrice
+                    logColor(colors.green, `Gainers: +${parseFloat(percent).toFixed(3)}% ==> +$${parseFloat(factor).toFixed(5)}}`)
+                    storage.put('percent', `+${parseFloat(percent).toFixed(3)}`)
+
+                    await _sell(marketPrice)
                 }
             }
         } catch (error) {
