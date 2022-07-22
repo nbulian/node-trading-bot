@@ -18,20 +18,36 @@ APP_BINANCE_SECRET=your-binance-secret
 For example, from inside the docker container or server run as follow:
 
 `
-node app.js ROSE BUSD 200
+node app.js init ADA USDT 20
 `
 
 Or using the keyword "resume" at the end to restart the process from the last state:
 
 `
-node app.js ROSE BUSD 200 resume
+node app.js init ADA USDT 20 -r
 `
 
-## Params description
-- First param: ticker symbols of the crypto to trade, for example BTC, ETH or MATIC.
-- Second param: ticker symbols of the crypto to pair with, usually an stable coin like USDT
-- Third parameter: the amount of crypto to buy in each iteration of the bot
-- Four parameter: it's option only if you want continue the last execution
+## To obtain help from run this
+
+`
+node app.js init -h
+`
+
+### It will show something like this
+
+```
+Initiate the crypto trading bot
+
+Arguments:
+  market1       ticker symbols of the crypto to trade, for example BTC, ETH, MATIC, etc
+  market2       ticker symbols of the crypto to pair with, usually an stable coin like USDT, BUSD, DAI, etc
+  amount        amount of crypto to buy in each iteration of the bot
+
+Options:
+  -r, --resume  use it to restart the process from the last state
+  -h, --help    display help for command
+```
+
 
 # Docker
 Execute the following command on your terminal to create the container
