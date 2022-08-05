@@ -7,29 +7,30 @@ logColor(colors.yellow, 'Welcome to Crypto Trading Spot Bot'.toLocaleUpperCase()
 program
     .name('node-trading-bot')
     .description('CLI Crypto Trading Spot Bot')
-    .version('1.1.0');
+    .version('2.0.0');
 
 program
-    .command('init')
+    .command('trade')
     .description('Initiate the crypto trading bot')
-    .argument('<market1>', 'ticker symbols of the crypto to trade, for example BTC, ETH, MATIC, etc')
-    .argument('<market2>', 'ticker symbols of the crypto to pair with, usually an stable coin like USDT, BUSD, DAI, etc')
+    .argument('<pair1>', 'ticker symbol of the crypto to trade, for example BTC, ETH, MATIC, etc')
+    .argument('<pair2>', 'ticker symbol of the crypto to pair with, usually an stable coin like USDT, BUSD, DAI, etc')
     .argument('<amount>', 'amount of crypto to buy in each iteration of the bot')
-    .option('-r, --resume', 'use it to restart the process from the last state')
-    .action((market1, market2, amount, options) => {
-        const resume = options.resume !== undefined ? true : false
-        binance(market1, market2, amount, resume)
+    .addArgument(new program.Argument('<env>', 'environment where to run').choices(['prod', 'dev']))
+    .action((pair1, pair2, amount, env) => {
+        process.env['APP_ENV'] = env.toLowerCase()
+        binance(pair1, pair2, amount, null)
     });
 
 program
     .command('sell')
-    .description('force the bot to sell everything to the current market price')
-    .argument('<market1>', 'ticker symbols of the crypto to trade, for example BTC, ETH, MATIC, etc')
-    .argument('<market2>', 'ticker symbols of the crypto to pair with, usually an stable coin like USDT, BUSD, DAI, etc')
-    .action((market1, market2) => {
-        console.log('market1:', market1);
-        console.log('market2:', market2);
-        // binance()
+    .description('sell all your open orders')
+    .argument('<pair1>', 'ticker symbol of the crypto to trade, for example BTC, ETH, MATIC, etc')
+    .argument('<pair2>', 'ticker symbol of the crypto to pair with, usually an stable coin like USDT, BUSD, DAI, etc')
+    .addArgument(new program.Argument('<env>', 'environment where to run').choices(['prod', 'dev']))
+    .option('-f, --force', 'force to sell at current the pair price')
+    .action((pair1, pair2, env) => {
+        process.env['APP_ENV'] = env.toLowerCase()
+        binance(pair1, pair2, 0, { sell: true, force })
     });
 
 program.parse();

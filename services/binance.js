@@ -1,246 +1,347 @@
 require('dotenv').config()
 const Storage = require('node-storage')
 const Binance = require('node-binance-api')
-const moment = require('moment')
-
 const { colors, log, logColor } = require('../utils/logger')
+const { sleep, elapsedTime } = require('../utils/time')
 
-const client = new Binance().options({
-    APIKEY: process.env.APP_BINANCE_APIKEY,
-    APISECRET: process.env.APP_BINANCE_SECRET
-})
-
-let MARKET1 = undefined
-let MARKET2 = undefined
-let MARKET = undefined
+let PAIR1 = undefined
+let PAIR2 = undefined
+let SYMBOL = undefined
 let BUY_ORDER_AMOUNT = undefined
 let storage = undefined
 
-const sleep = (milliseconds) => new Promise(resolve => setTimeout(resolve, milliseconds))
+const binance = new Binance()
 
-const elapsedTime = () => {
-    const diff = Date.now() - storage.get('start_time')
-    return moment.utc(diff).format('HH:mm:ss')
+const _exchangeInfo = async (symbols) => {
+    await binance.exchangeInfo(function (error, data) {
+        let minimums = {};
+        for (let obj of data.symbols) {
+            if (symbols.includes(obj.symbol)) {
+                let filters = { status: obj.status };
+                for (let filter of obj.filters) {
+                    if (filter.filterType == "MIN_NOTIONAL") {
+                        filters.minNotional = filter.minNotional;
+                    } else if (filter.filterType == "PRICE_FILTER") {
+                        filters.minPrice = filter.minPrice;
+                        filters.maxPrice = filter.maxPrice;
+                        filters.tickSize = filter.tickSize;
+                    } else if (filter.filterType == "LOT_SIZE") {
+                        filters.stepSize = filter.stepSize;
+                        filters.minQty = filter.minQty;
+                        filters.maxQty = filter.maxQty;
+                    } else if (filter.filterType == "PERCENT_PRICE") {
+                        filters.multiplierUp = filter.multiplierUp;
+                        filters.multiplierDown = filter.multiplierDown;
+                        filters.avgPriceMins = filter.avgPriceMins;
+                    }
+                }
+                filters.orderTypes = obj.orderTypes;
+                filters.icebergAllowed = obj.icebergAllowed;
+                minimums[obj.symbol] = filters;
+            }
+        }
+        storage.put('exchange_info', minimums)
+    });
 }
 
-const _balances = async () => {
-    return await client.balance()
+const _updateBalances = async (isInitial) => {
+    const balancesObj = await binance.balance()
+    const currentBalances = storage.get('balances')
+    const balances = {}
+
+    for (const symbol in balancesObj) {
+        if (balancesObj[symbol].available > 0 || balancesObj[symbol].onOrder > 0) {
+            const initial = isInitial ? balancesObj[symbol].available : currentBalances.hasOwnProperty(symbol) ? currentBalances[symbol].initial : 0
+            balances[symbol] = {
+                initial,
+                available: balancesObj[symbol].available,
+                onOrder: balancesObj[symbol].onOrder
+            }
+        }
+    }
+
+    storage.put('balances', balances)
 }
 
-// Reset the entry price when the bot starts
-const _newPriceReset = (_market, balance, price) => {
-    const market = _market == 1 ? MARKET1 : MARKET2
-    const marketBalance = parseFloat(storage.get(`${market.toLowerCase()}_balance`))
-    if (marketBalance <= balance) {
-        storage.put('start_price', price)
+const _storeInitialData = async () => {
+
+    await _exchangeInfo(SYMBOL)
+
+    const positions = storage.get('positions')
+    const startTime = Date.now()
+    const marketPrice = parseFloat((await binance.prices(SYMBOL))[SYMBOL])
+
+    storage.put('start_time', startTime)
+    storage.put('last_price', marketPrice)
+
+    if (positions && positions.length > 0) {
+        logColor(colors.yellow, 'Resuming from last run...')
+    } else {
+        logColor(colors.yellow, 'Creating storage data...')
+        storage.put('positions', [])
+        storage.put('profits', 0)
+        storage.put(`initial_${PAIR1.toLowerCase()}_balance`, storage.get(`${PAIR1.toLowerCase()}_balance`))
+        storage.put(`initial_${PAIR2.toLowerCase()}_balance`, storage.get(`${PAIR2.toLowerCase()}_balance`))
+        await _updateBalances(true)
     }
 }
 
-const _updateBalances = async () => {
-    const balances = await _balances()
-    storage.put(`${MARKET1.toLowerCase()}_balance`, parseFloat(balances[MARKET1].available))
-    storage.put(`${MARKET2.toLowerCase()}_balance`, parseFloat(balances[MARKET2].available))
-}
+const _logProfits = async () => {
+    const balances = storage.get('balances')
 
-const _calculateProfits = async () => {
-    const orders = storage.get('orders')
-    const sold = orders.filter(order => {
-        return order.status === 'sold'
-    })
-    const totalSoldProfits = sold.length > 0 ?
-        sold.map(order => order.profit).reduce((total, next) => parseFloat(total) + parseFloat(next)) :
-        0
-    storage.put('profits', totalSoldProfits + parseFloat(storage.get('profits')))
-}
-
-const _logProfits = (price) => {
     const profits = parseFloat(storage.get('profits'))
     const isGainerProfit = profits > 0 ? 1 : (profits < 0 ? 2 : 0) // 1 profit, 2 loss and 0 breakeven
 
     logColor((isGainerProfit === 1 ?
         colors.green : isGainerProfit === 2 ?
-            colors.yellow : colors.gray),
-        `Global Profits: ${parseFloat(storage.get('profits')).toFixed(3)} ${MARKET2}`)
+            colors.red : colors.yellow),
+        `Global Profits: ${parseFloat(storage.get('profits')).toFixed(3)} ${PAIR2} | Initial: ${parseFloat(balances[PAIR2].initial).toFixed(2)}`)
 
-    const market1Balance = parseFloat(storage.get(`${MARKET1.toLowerCase()}_balance`)) || 0
-    const market2Balance = parseFloat(storage.get(`${MARKET2.toLowerCase()}_balance`)) || 0
-    const initialBalance = parseFloat(storage.get(`initial_${MARKET2.toLowerCase()}_balance`)) || 0
-    const currentBalance = parseFloat(market1Balance * price + market2Balance) || 0
+    log('================================================================================')
 
-    logColor(colors.gray,
-        `Balance: ${market1Balance} ${MARKET1}, ${market2Balance} ${MARKET2}, Current: ${currentBalance.toFixed(2)} ${MARKET2}, Initial: ${initialBalance.toFixed(2)} ${MARKET2}`)
+    for (const symbol in balances) {
+        if ((balances[symbol].available > 0 || balances[symbol].onOrder > 0)) {
+            log(`${symbol} Balance ${parseFloat(balances[symbol].available).toFixed(4)} | On Order ${parseFloat(balances[symbol].onOrder).toFixed(4)} `)
+        }
+    }
+
 }
 
-const _buy = async (price, amount) => {
-    if (parseFloat(storage.get(`${MARKET2.toLowerCase()}_balance`)) >= (BUY_ORDER_AMOUNT * price)) {
-        const orders = storage.get('orders')
-        const factor = process.env.APP_PRICE_PERCENT * price / 100
+const _handleQuantityFilters = (symbol, quantity, price) => {
 
-        const order = {
-            buy_price: price,
-            amount,
-            sell_price: price + factor,
-            sold_price: 0,
-            status: 'pending',
-            profit: 0
+    const exchangeInfo = storage.get('exchange_info')
+
+    // Set minimum order quantity with minQty
+    if (quantity < exchangeInfo[symbol].minQty) quantity = exchangeInfo[symbol].minQty;
+
+    // Set minimum order quantity with minNotional
+    if (price * quantity < exchangeInfo[symbol].minNotional) {
+        quantity = exchangeInfo[symbol].minNotional / price;
+    }
+
+    // Round to stepSize
+    return binance.roundStep(quantity, exchangeInfo[symbol].stepSize);
+}
+
+const _handlePriceFilters = (symbol, price) => {
+    const exchangeInfo = storage.get('exchange_info')
+
+    const tickSize = exchangeInfo[symbol].tickSize
+
+    return binance.roundTicks(price, tickSize)
+}
+
+const _sell = async (marketPrice, force) => {
+
+    const positions = storage.get('positions')
+
+    const updatedPositions = positions.map(position => {
+
+        if (position.status == 'BOUGHT') {
+            if (marketPrice < position.sell_price) {
+                position.status = 'SELLING'
+            } else {
+                position.sell_price = marketPrice
+            }
         }
 
-        log(`
-            Buying ${MARKET1}
-            ==================
-            amountIn: ${parseFloat(BUY_ORDER_AMOUNT * price).toFixed(2)} ${MARKET2}
-            amountOut: ${BUY_ORDER_AMOUNT} ${MARKET1}
+        return position;
+    })
+
+    const filterBy = force ? () => true : (position) => position.status === 'SELLING'
+
+    const positionsToSell = updatedPositions.filter(filterBy)
+
+    if (positionsToSell.length > 0) {
+        const totalQuantity = parseFloat(positionsToSell.map(position => position.quantity).reduce((prev, next) => parseFloat(prev) + parseFloat(next)))
+
+        if (totalQuantity > 0) {
+
+            logColor(colors.red, `
+            Creating order on exchange... 
+            =============================
+            Selling ${SYMBOL}
+            At price: ${marketPrice} ${PAIR2}
+            Amount: ${parseFloat(totalQuantity * marketPrice).toFixed(2)} ${PAIR2}
+            Quantity: ${totalQuantity.toFixed(4)} 
+            `)
+
+            try {
+
+                const profits = parseFloat(storage.get('profits'))
+                const quantity = _handleQuantityFilters(SYMBOL, totalQuantity, marketPrice)
+                const response = await binance.marketSell(SYMBOL, quantity)
+
+                if (response.status === 'FILLED' || response.status === 'PARTIALLY_FILLED') {
+
+                    const sellPrice = parseFloat(response.fills[0].price)
+
+                    const finalPositions = updatedPositions.map(position => {
+
+                        const positionFounded = positionsToSell.find(item => position.id === item.id)
+
+                        if (positionFounded) {
+                            position.status = 'SOLD'
+                            position.sellId = response.orderId
+                            position.sold_price = sellPrice
+                            position.profit = (parseFloat(positionFounded.quantity) * sellPrice)
+                                - (parseFloat(positionFounded.quantity) * parseFloat(positionFounded.buy_price))
+                        }
+
+                        storage.put('profits', profits + parseFloat(position.profit))
+
+                        return position
+                    });
+
+                    storage.put('positions', finalPositions)
+
+                    await _updateBalances(false)
+
+                    logColor(colors.green, `Sold ${totalQuantity.toFixed(4)} ${PAIR1} for ${parseFloat(totalQuantity * sellPrice).toFixed(2)} ${PAIR2}\n`)
+
+                    return response
+                }
+
+            } catch (error) {
+                logColor(colors.red, `Selling: ${JSON.stringify(error)}`)
+            }
+        }
+    }
+}
+
+const _buy = async (marketPrice, lastPrice) => {
+
+    const factor = (lastPrice - marketPrice)
+    const percent = 100 * factor / lastPrice
+
+    if (percent >= process.env.APP_PRICE_PERCENT) {
+
+        const balances = storage.get('balances')
+
+        if (parseFloat(balances[PAIR2].available) < parseFloat(BUY_ORDER_AMOUNT)) {
+            logColor(colors.red, 'Buying: account has insufficient balance for requested action.')
+            return false;
+        }
+
+        const quantity = _handleQuantityFilters(SYMBOL, (BUY_ORDER_AMOUNT / marketPrice), marketPrice)
+
+        const order = {
+            symbol: SYMBOL,
+            quantity,
+            buy_price: marketPrice,
+            sell_price: marketPrice,
+            sold_price: 0,
+            profit: 0,
+            status: 'BUYING',
+        }
+
+        logColor(colors.green, `
+            Creating order on exchange... 
+            =============================
+            Buying ${SYMBOL}
+            At price: ${marketPrice} ${PAIR2}
+            Amount: ${BUY_ORDER_AMOUNT} ${PAIR2}
+            Quantity: ${quantity.toFixed(4)} 
         `)
 
         try {
-            const response = await client.marketBuy(MARKET, order.amount)
+            const response = await binance.marketBuy(SYMBOL, quantity)
 
-            if (response && response.status === 'FILLED') {
-                order.status = 'bought'
+            if (response.status === 'FILLED' || response.status === 'PARTIALLY_FILLED') {
+                order.status = 'BOUGHT'
                 order.id = response.orderId
                 order.buy_price = parseFloat(response.fills[0].price)
 
-                orders.push(order)
-                storage.put('start_price', order.buy_price)
-                await _updateBalances()
+                const positions = storage.get('positions')
+                positions.push(order)
+                storage.put('positions', positions)
 
-                logColor(colors.green, '==================')
-                logColor(colors.green, `Bought ${BUY_ORDER_AMOUNT} ${MARKET1} for ${parseFloat(BUY_ORDER_AMOUNT * price).toFixed(2)} ${MARKET2}, Price: ${order.buy_price}\n`)
-                logColor(colors.green, '==================')
+                await _updateBalances(false)
 
-                await _calculateProfits()
-            } else _newPriceReset(2, BUY_ORDER_AMOUNT * price, price)
-        } catch (error) {
-            logColor(colors.red, `Error buying ${order.amount} ${MARKET} ${error.body}`)
-        }
-    } else _newPriceReset(2, BUY_ORDER_AMOUNT * price, price)
-}
+                logColor(colors.green, `Bought ${quantity.toFixed(4)} ${PAIR1} for ${(order.buy_price).toFixed(2)} ${PAIR2}\n`)
 
-const _sell = async (price) => {
-    let orders = storage.get('orders')
-    const toSold = []
-
-    if (orders && orders.length > 0) {
-        orders.forEach(order => {
-            if (price >= order.sell_price) {
-                order.sold_price = price
-                order.status = 'pending'
-                toSold.push(order)
+                return response
             }
-        });
+        } catch (error) {
+            logColor(colors.red, `Buying: ${JSON.stringify(error)}`)
+        }
     }
-
-    if (toSold.length > 0) {
-        const totalAmount = parseFloat(toSold.map(order => order.amount).reduce((total, next) => parseFloat(total) + parseFloat(next)))
-        if (totalAmount > 0 && parseFloat(storage.get(`${MARKET1.toLowerCase()}_balance`)) >= totalAmount) {
-            log(`
-                Selling ${MARKET1}
-                ==================
-                amountIn: ${totalAmount.toFixed(2)} ${MARKET1}
-                amountOut: ${parseFloat(totalAmount * price)} ${MARKET2}
-            `)
-
-            const response = await client.marketSell(MARKET, totalAmount)
-
-            if (response && response.status === 'FILLED') {
-                const sellPrice = parseFloat(response.fills[0].price)
-
-                orders.forEach(order => {
-                    order.sold_price = sellPrice
-                    order.status = 'pending'
-                    toSold.forEach(item => {
-                        if (order.id === item.id) {
-                            item.profit = (parseFloat(item.amount) * sellPrice)
-                                - (parseFloat(item.amount) * parseFloat(item.buy_price))
-                            item.status = 'sold'
-                            order = item
-                        }
-                    })
-                });
-
-                storage.put('start_price', sellPrice)
-                await _updateBalances()
-
-                logColor(colors.yellow, '==================')
-                logColor(colors.yellow, `Sold ${totalAmount} ${MARKET1} for ${parseFloat(totalAmount * sellPrice).toFixed(2)} ${MARKET2}, Price: ${sellPrice}\n`)
-                logColor(colors.yellow, '==================')
-
-                await _calculateProfits()
-
-                // removing orders with status sold
-                orders = orders.filter(order => order.status !== 'sold');
-
-            } else storage.put('start_price', price)
-        } else storage.put('start_price', price)
-    } else storage.put('start_price', price)
 }
 
 const _broadcast = async () => {
     while (true) {
         try {
-            let marketPrice = await client.prices(MARKET)
-            marketPrice = parseFloat(marketPrice[MARKET])
+            const marketPrice = parseFloat((await binance.prices(SYMBOL))[SYMBOL])
 
             if (marketPrice) {
-                const startPrice = storage.get('start_price')
 
                 console.clear()
 
-                log(`Running Time: ${elapsedTime()}`)
+                const lastPrice = storage.get('last_price')
+                const time = storage.get('start_time')
+
+                log(`Running Time: ${elapsedTime(time)}`)
                 log('================================================================================')
                 _logProfits(marketPrice)
                 log('================================================================================')
-                log(`Prev price: ${startPrice} `)
+                log(`Last price: ${lastPrice} `)
                 log(`New price: ${marketPrice} `)
 
-                if (marketPrice < startPrice) {
-                    const factor = (startPrice - marketPrice)
-                    const percent = 100 * factor / startPrice
-                    logColor(colors.yellow, `Losers: -${parseFloat(percent).toFixed(3)}% ==> -$${parseFloat(factor).toFixed(5)}}`)
-                    storage.put('percent', `-${parseFloat(percent).toFixed(3)}`)
 
-                    if (percent >= process.env.APP_PRICE_PERCENT) {
-                        await _buy(marketPrice, BUY_ORDER_AMOUNT)
-                    }
-                } else {
-                    const factor = (marketPrice - startPrice)
-                    const percent = 100 * factor / marketPrice
-                    logColor(colors.green, `Gainers: +${parseFloat(percent).toFixed(3)}% ==> +$${parseFloat(factor).toFixed(5)}}`)
-                    storage.put('percent', `+${parseFloat(percent).toFixed(3)}`)
+                _sell(marketPrice)
 
-                    await _sell(marketPrice)
+                if (marketPrice < lastPrice) {
+                    _buy(marketPrice, lastPrice)
                 }
             }
+
+            storage.put('last_price', marketPrice)
+
+            await _updateBalances(false)
+
         } catch (error) {
             logColor(colors.red, error)
         }
 
-        await sleep(process.env.APP_SLEEP_TIME)
+        await sleep(process.env.APP_BINANCE_SLEEP_TIME)
     }
 }
 
-const init = async (market1, market2, amount, resume) => {
+const init = async (pair1, pair2, amount, sell) => {
 
-    MARKET1 = market1
-    MARKET2 = market2
-    MARKET = MARKET1 + MARKET2
+    console.clear()
+
+    if (['production', 'prod', 'live'].includes(process.env.APP_ENV)) {
+        binance.options({
+            APIKEY: process.env.APP_BINANCE_SPOT_APIKEY,
+            APISECRET: process.env.APP_BINANCE_SPOT_SECRET
+        })
+    } else {
+        binance.options({
+            APIKEY: process.env.APP_BINANCE_SPOT_TEST_APIKEY,
+            APISECRET: process.env.APP_BINANCE_SPOT_TEST_SECRET,
+            test: true,
+            useServerTime: true,
+            verbose: true,
+            urls: {
+                base: 'https://testnet.binance.vision/api/',
+            }
+        })
+    }
+
+    // amount validation
+    if (isNaN(amount)) throw new Error('amount should be a valid number')
+    if (parseFloat(amount) < parseFloat(process.env.APP_MIN_AMOUNT)) throw new Error(`amount should be bigger than ${process.env.APP_MIN_AMOUNT} `)
+    if (parseFloat(amount) > parseFloat(process.env.APP_MAX_AMOUNT)) throw new Error(`amount should be lower than ${process.env.APP_MAX_AMOUNT} `)
+
+    PAIR1 = pair1
+    PAIR2 = pair2
+    SYMBOL = PAIR1 + PAIR2
     BUY_ORDER_AMOUNT = amount
 
-    storage = new Storage(`./data/${MARKET}.json`)
+    storage = new Storage(`./data/${SYMBOL}.json`)
 
-    if (!resume) {
-        const startTime = Date.now()
-        const price = await client.prices(MARKET)
-        const balances = await _balances()
-        storage.put('start_time', startTime)
-        storage.put('start_price', parseFloat(price[MARKET]))
-        storage.put('orders', [])
-        storage.put('profits', 0)
-        storage.put(`${MARKET1.toLowerCase()}_balance`, parseFloat(balances[MARKET1].available))
-        storage.put(`${MARKET2.toLowerCase()}_balance`, parseFloat(balances[MARKET2].available))
-        storage.put(`initial_${MARKET1.toLowerCase()}_balance`, storage.get(`${MARKET1.toLowerCase()}_balance`))
-        storage.put(`initial_${MARKET2.toLowerCase()}_balance`, storage.get(`${MARKET2.toLowerCase()}_balance`))
-    }
+    await _storeInitialData()
 
     _broadcast()
 }
