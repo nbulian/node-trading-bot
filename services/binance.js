@@ -184,8 +184,8 @@ const _sell = async (marketPrice, force) => {
                             position.status = 'SOLD'
                             position.sellId = response.orderId
                             position.sold_price = sellPrice
-                            position.profit = (parseFloat(positionFounded.quantity) * sellPrice)
-                                - (parseFloat(positionFounded.quantity) * parseFloat(positionFounded.buy_price))
+                            position.profit = (parseFloat(response.executedQty) * sellPrice)
+                                - (parseFloat(response.executedQty) * parseFloat(positionFounded.buy_price))
                         }
 
                         storage.put('profits', profits + parseFloat(position.profit))
