@@ -261,6 +261,10 @@ const _buy = async (marketPrice, lastPrice) => {
                 logColor(colors.green, `Bought ${quantity.toFixed(4)} ${PAIR1} for ${(order.buy_price).toFixed(2)} ${PAIR2}\n`)
 
                 return response
+            } else {
+                // Temp check
+                console.log('CHECK THIS', response)
+                process.exit(1);
             }
         } catch (error) {
             logColor(colors.red, `Buying: ${JSON.stringify(error)}`)
@@ -307,7 +311,7 @@ const _broadcast = async () => {
     }
 }
 
-const init = async (pair1, pair2, amount, sell) => {
+const init = async (pair1, pair2, amount, options) => {
 
     console.clear()
 
@@ -329,11 +333,6 @@ const init = async (pair1, pair2, amount, sell) => {
         })
     }
 
-    // amount validation
-    if (isNaN(amount)) throw new Error('amount should be a valid number')
-    if (parseFloat(amount) < parseFloat(process.env.APP_MIN_AMOUNT)) throw new Error(`amount should be bigger than ${process.env.APP_MIN_AMOUNT} `)
-    if (parseFloat(amount) > parseFloat(process.env.APP_MAX_AMOUNT)) throw new Error(`amount should be lower than ${process.env.APP_MAX_AMOUNT} `)
-
     PAIR1 = pair1
     PAIR2 = pair2
     SYMBOL = PAIR1 + PAIR2
@@ -343,7 +342,28 @@ const init = async (pair1, pair2, amount, sell) => {
 
     await _storeInitialData()
 
-    _broadcast()
+    if (options) {
+        if (options.sell && !options.force) {
+            const marketPrice = parseFloat((await binance.prices(SYMBOL))[SYMBOL])
+            _sell(marketPrice, options.sell)
+        } else {
+            const balances = await binance.balance()
+            const quantity = balances[PAIR1].available
+            if (quantity>0) {
+                const result = await binance.marketSell(SYMBOL, quantity)
+                logColor(colors.red, `Forced sell for ${SYMBOL}`)
+            } else {
+                logColor(colors.yellow, `Nothing to sell for ${SYMBOL}`)
+            }
+        }
+    } else {
+        // amount validation
+        if (isNaN(amount)) throw new Error('amount should be a valid number')
+        if (parseFloat(amount) < parseFloat(process.env.APP_MIN_AMOUNT)) throw new Error(`amount should be bigger than ${process.env.APP_MIN_AMOUNT} `)
+        if (parseFloat(amount) > parseFloat(process.env.APP_MAX_AMOUNT)) throw new Error(`amount should be lower than ${process.env.APP_MAX_AMOUNT} `)
+
+        _broadcast()
+    }
 }
 
 module.exports = init
